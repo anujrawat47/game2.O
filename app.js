@@ -16,15 +16,24 @@ const scoreODisplay = document.querySelector("#score-o");
 const resetScoreboardBtn = document.querySelector('#reset-scoreboard');
 const removeSound = document.getElementById("remove-sound");
 console.log("removeSound:", removeSound); // this should NOT be null
-
+let gameMode = "PvP"; // or "AI"
 
 removeSound.volume = 0.8;
+
+document.getElementById("mode-ai").addEventListener("click", () => {
+    gameMode = "ai";
+    resetGame();
+});
+
+document.getElementById("mode-multiplayer").addEventListener("click", () => {
+    gameMode = "multiplayer";
+    resetGame();
+});
 
 // Unlock audio on first interaction
 document.body.addEventListener("click", () => {
     removeSound.play().catch(() => {});
 }, { once: true });
- 
 
 const winPatterns = [
     [0, 1, 2],
@@ -36,6 +45,85 @@ const winPatterns = [
     [3, 4, 5],
     [6, 7, 8]
 ];
+
+const scores = {
+    X: 1,
+    O: -1,
+    tie: 0
+};
+
+function checkWinner(board) {
+    for (let pattern of winPatterns) {
+        const [a, b, c] = pattern;
+        if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+            return board[a];
+        }
+    }
+
+    if (board.every(cell => cell !== "")) {
+        return "tie";
+    }
+
+    return null;
+}
+
+function minimax(board, depth, isMaximizing) {
+    let result = checkWinner(board);
+    if (result !== null) {
+        return scores[result];
+    }
+
+    if (isMaximizing) {
+        let bestScore = -Infinity;
+        for (let i = 0; i < 9; i++) {
+            if (board[i] === "") {
+                board[i] = "X";
+                let score = minimax(board, depth + 1, false);
+                board[i] = "";
+                bestScore = Math.max(score, bestScore);
+            }
+        }
+        return bestScore;
+    } else {
+        let bestScore = Infinity;
+        for (let i = 0; i < 9; i++) {
+            if (board[i] === "") {
+                board[i] = "O";
+                let score = minimax(board, depth + 1, true);
+                board[i] = "";
+                bestScore = Math.min(score, bestScore);
+            }
+        }
+        return bestScore;
+    }
+}
+
+function aiMove() {
+    let board = Array.from(boxes).map(box => box.innerText);
+    let bestScore = -Infinity;
+    let move = -1;
+
+    for (let i = 0; i < 9; i++) {
+        if (board[i] === "") {
+            board[i] = "X";
+            let score = minimax(board, 0, false);
+            board[i] = "";
+            if (score > bestScore) {
+                bestScore = score;
+                move = i;
+            }
+        }
+    }
+
+    if (move !== -1) {
+        boxes[move].innerText = "X";
+        boxes[move].disabled = true;
+        moveQueue.push({ index: move, value: "X" });
+        checkWin();
+        turnO = true;
+        document.getElementById('turn-indicator').innerText = `Turn: O`;
+    }
+}
 
 const showResetButton = () => {
     resetButton.style.display = "inline-block";
@@ -54,6 +142,7 @@ const resetGame = () => {
     msgContainer.classList.add('hide');
     moveQueue = [];
     showResetButton();
+    document.getElementById('turn-indicator').innerText = `Turn: O`;
 };
 
 const resetScoreboard = () => {
@@ -67,17 +156,28 @@ boxes.forEach((box, index) => {
     box.addEventListener("click", () => {
         if (box.innerText !== "" || gameOver) return;
 
-        if (turnO) {
-            box.innerText = "O";
-            turnO = false;
-        } else {
-            box.innerText = "X";
-            turnO = true;
-        }
+        if (gameMode === "multiplayer") {
+            box.innerText = turnO ? "O" : "X";
+            box.disabled = true;
+            moveQueue.push({ index: index, value: box.innerText });
+            checkWin();
+            turnO = !turnO;
+            document.getElementById('turn-indicator').innerText = `Turn: ${turnO ? 'O' : 'X'}`;
+        } 
+        else if (gameMode === "ai") {
+            if (!turnO) return;
 
-        box.disabled = true;
-        moveQueue.push({ index: index, value: box.innerText });
-        checkWin();
+            box.innerText = "O";
+            box.disabled = true;
+            moveQueue.push({ index: index, value: box.innerText });
+            checkWin();
+
+            turnO = false;
+
+            if (!gameOver) {
+                setTimeout(aiMove, 500);
+            }
+        }
     });
 });
 
@@ -92,6 +192,7 @@ const enableBoxes = () => {
         box.disabled = false;
         box.innerText = "";
         box.classList.remove("removing");
+        box.classList.remove("win");
     }
 };
 
@@ -119,15 +220,27 @@ const checkWin = () => {
         let pos2 = boxes[pattern[1]].innerText;
         let pos3 = boxes[pattern[2]].innerText;
 
-        if (pos1 !== "" && pos2 !== "" && pos3 !== "") {
-            if (pos1 === pos2 && pos2 === pos3) {
-                showWinner(pos1);
-            }
+        if (pos1 !== "" && pos1 === pos2 && pos2 === pos3) {
+            // Highlight the winning boxes
+            pattern.forEach(index => {
+                boxes[index].classList.add("win");
+            });
+
+            showWinner(pos1);
+            return;
         }
+    }
+
+    // Check for tie
+    if ([...boxes].every(box => box.innerText !== "") && !gameOver) {
+        msg.innerText = "It's a Tie!";
+        msgContainer.classList.remove('hide');
+        gameOver = true;
+        showNewGameButton();
     }
 };
 
-// 🕒 Auto-remove oldest move
+
 setInterval(() => {
   if (moveQueue.length > 0 && !gameOver) {
     const oldest = moveQueue.shift();
@@ -140,7 +253,6 @@ setInterval(() => {
       box.disabled = false;
       box.classList.remove("removing");
 
-      // ✅ Safe audio play
       if (removeSound) {
         removeSound.pause();
         removeSound.currentTime = 0;
@@ -152,8 +264,6 @@ setInterval(() => {
   }
 }, 2000);
 
-
-// 🔘 Button Events
 newGameButton.addEventListener('click', resetGame);
 resetButton.addEventListener('click', resetGame);
 resetScoreboardBtn.addEventListener('click', resetScoreboard);
